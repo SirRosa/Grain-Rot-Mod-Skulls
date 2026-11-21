@@ -1,4 +1,4 @@
-name: GrainRotSkulls - test and package
+name: GrainRotSkulls v0.2 - tests and installation ZIP
 on:
   push:
     branches: [main]
@@ -13,26 +13,27 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install Lua 5.4
+      - name: Install Lua
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y lua5.4
-      - name: Lua parse checks
+      - name: Validate scripts
         run: |
-          luac5.4 -p ue4ss/Mods/GrainRotSkulls/Scripts/main.lua
-          luac5.4 -p tests/test_skulls.lua
-      - name: Test probability logic
+          find ue4ss tests -name '*.lua' -print -exec luac5.4 -p {} \;
+      - name: Run policy tests
         run: lua5.4 tests/test_skulls.lua
-      - name: Prepare mod ZIP
+      - name: Simulate UE4SS runtime with zero players
+        run: lua5.4 tests/test_runtime.lua
+      - name: Build installation package
         run: |
           mkdir -p out
           cd ue4ss
-          zip -r ../out/GrainRotSkulls-v0.1.0-alpha.zip Mods/GrainRotSkulls
+          zip -r ../out/GrainRotSkulls-v0.2.0-alpha.zip Mods/GrainRotSkulls
           cd ..
-          unzip -t out/GrainRotSkulls-v0.1.0-alpha.zip
-          sha256sum out/GrainRotSkulls-v0.1.0-alpha.zip
+          unzip -t out/GrainRotSkulls-v0.2.0-alpha.zip
+          sha256sum out/GrainRotSkulls-v0.2.0-alpha.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: GrainRotSkulls-v0.1.0-alpha
-          path: out/GrainRotSkulls-v0.1.0-alpha.zip
+          name: GrainRotSkulls-v0.2.0-alpha
+          path: out/GrainRotSkulls-v0.2.0-alpha.zip
           if-no-files-found: error

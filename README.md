@@ -1,44 +1,35 @@
-# GrainRotSkulls v0.1.0-alpha
+# GrainRotSkulls 0.2.0-alpha — ALWAYS THREE RED SKULLS
 
-An experimental UE4SS Lua mod for GRAIN ROT, targeting the **big red skull** modifier (`ExtraEnemy`) in each of the three elevator symbols.
+UE4SS Lua mod for GRAIN ROT. It **ignores all player Grain Rot values and player counts**. Goal: **ExtraEnemy / big red skull on all three elevator modifier slots for every descent**.
 
-## Rules
+## How v0.2 differs from v0.1
 
-The host reads each active player's `HeldenCharacter.CharacterStats.CurrentGrainRot` at elevator roll time. Players are sorted from highest to lowest percentage and assigned one per slot (up to three). Slots roll independently.
+v0.1 attempted to capture each player's Grain Rot only inside a native roll hook and apply a modifier patch after the native RNG. If the hook was not called or the row ID could not be resolved, absolutely nothing happened. v0.2 does NOT depend on that hook to start:
 
-| Players' Grain Rot | Slot 1 | Slot 2 | Slot 3 |
-| --- | --- | --- | --- |
-| 50%, 20% | 50% skull | 20% skull | vanilla |
-| 100% | 100% skull | vanilla | vanilla |
-| 100%, 100%, 100% | 100% skull | 100% skull | 100% skull |
-| 0%, 0%, 0% | 0% skull | 0% skull | 0% skull |
-
-For an assigned slot, failing the chance leaves any pre-existing non-skull modifier as normal; an already-rolled skull is replaced with the game's `Blank` modifier to ensure the precise probability. With fewer than three players, unassigned slots stay vanilla.
+1. On host game thread, it locates the actual \`/Game/Data/DungeonModifers.DungeonModifers\` DataTable.
+2. It resolves the **real** \`ModiferID\` for \`ExtraEnemy\` from its row (not the enum's underlying implementation value).
+3. It writes \`RandomWeight=1000000\`, \`MaxCount=3\`, \`RequiredLevel=0\` to the skull modifier and \`RandomWeight=0\` to all others (before the elevator roll).
+4. It additionally patches the first three elements of the actual \`HeldenDungeonActor.CurrentSeed.ModiferIDs\` to the three identical skull IDs, with a readback check. This happens on a low-frequency timer and on real engine hooks.
+5. It NEVER calls the native world regeneration methods itself and NEVER edits saved files or the game binary.
 
 ## Install
 
-Go to [Actions](https://github.com/SirRosa/Grain-Rot-Mod-Skulls/actions), open the latest successful **GrainRotSkulls - test and package** run, download the `GrainRotSkulls-v0.1.0-alpha` artifact, extract the ZIP into the **UE4SS root** so it creates `Mods/GrainRotSkulls/Scripts/main.lua` and `Mods/GrainRotSkulls/enabled.txt`. Install on the multiplayer **host**.
+Download \`GrainRotSkulls-v0.2.0-alpha\` from a **successful v0.2 GitHub Actions run** in the [Actions tab](https://github.com/SirRosa/Grain-Rot-Mod-Skulls/actions). Unzip directly into the game's **UE4SS root**, yielding \`Mods/GrainRotSkulls/Scripts/main.lua\` and \`Mods/GrainRotSkulls/enabled.txt\`. **Remove the old GrainRotSkulls folder first**. Install on the **host**. No extra DLL needed.
 
-## How it works
+## What to look for in UE4SS.log
 
-Uses verified types and native function names in `SirRosa/Grain-Rot-Mod-Data-Base` (2026-11-20 USMAP / ObjectDump):
+Log lines:
+- \`v0.2.0-alpha LOADED\` — Lua mod actually started
+- \`TABLE TUNED ... ExtraEnemy ID=<value>\` — verified DataTable writes completed
+- \`SEED FORCED ... readback OK\` or \`SEED ALREADY TRIPLE-SKULL\` — the native seed has three matching IDs
 
-- `HeldenElevatorMachine:StartDungeonRoll_Auth` (roll hook)
-- `HeldenDungeonActor.CurrentSeed.ModiferIDs` (three uint16 modifier IDs used for generation)
-- `HeldenDungeonActor:RegenerateDungeon` (generation hook)
-- `HeldenElevatorMachine:StartSymbolAnimation_Multicast`
-- `HeldenStatsComponent.CurrentGrainRot` (per-player source)
-- `HeldenDataSingleton.DungeonModiferDataTable` (dynamic `ExtraEnemy` and `Blank` IDs)
+Warnings are deliberately explicit. A readback is **not** equivalent to confirmed native gameplay/UI/client replication.
 
-IDs are looked up from rows by `DataName/DataAssetName`. **Never substitute the ExtraEnemy implementation enum value (2) as a modifier row ID.** If rows cannot be resolved, the code logs a warning and leaves the native roll unchanged. Mod runs only in authoritative host/game-thread callbacks, not per-frame animation ticks, and does not directly edit player stats or saves.
+## Known limitations — do not confuse with working in-game behavior
 
-## IMPORTANT: alpha / not game-tested
+- Tests check Lua logic and a **mock engine** (table and seed writes, no player), plus syntax. Real UE4SS/game multiplayer is **not yet verified**.
+- Some game builds may roll fewer than three \`ModiferIDs\` and keep blank slots implicit. Since native TArray resizing in UE4SS 3.0.x can be unsafe, v0.2 only overwrites three already existing entries; if fewer, it emits \`ModiferIDs has N entries\` instead of potentially crashing the game. Table weights are still tuned.
+- \`ExtraEnemy.MaxCount\` may not be the only native uniqueness restriction, and changing \`CurrentSeed\` after dungeon creation might not cause game effects to reapply. **Three skulls visible and active in the actual game remain unconfirmed until a real host run.**
+- Table changes can affect all modifier rolls during this game process and reset after restart or unloading the mod. No intentional save modifications.
 
-- GitHub Actions checks syntax and **simulated** probability rules. Native hook activation, timing, seed replication and correct symbol display at clients are not yet demonstrated in a real session.
-- The native game can restrict repeated `ExtraEnemy` IDs with `MaxCount`. The mod attempts to raise the actual table row to `MaxCount=3`, verifies the write and logs the result. Three 100% players are guaranteed by Lua probability rules, but the game may still deduplicate or ignore repeated effects; this needs live verification.
-- `CurrentGrainRot` defaults to a 0–100 scale. If a real log proves the game uses 0–1, change `ROT_SCALE` at the top of `main.lua` from 100 to 1.
-- Successful hook registration does not prove a callback was invoked. A log line `roll N APPLIED` confirms only a Lua-side modifier-array readback, not that the UI, level generation, Steam achievement or multiplayer client obeyed it.
-
-### Live verification
-
-Test with two players at 100% and 0% (host/client) and then three players at 100%. Examine whether all three visible symbols and **actual effects** agree; check `UE4SS.log` for `roll captured`, `DataTable IDs`, `APPLIED`, any `MaxCount`, `expired`, or `unresolved` lines. Provide the log for follow-up corrections.
+If it still shows vanilla symbols, provide the **UE4SS.log from the host** after one attempt so the startup logs / native hook activation / DataTable row discovery can be diagnosed rather than guessing another API.

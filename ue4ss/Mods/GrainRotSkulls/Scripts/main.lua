@@ -1,354 +1,340 @@
--- GrainRotSkulls v0.1.0-alpha. Native game integration MUST be verified live.
--- Authoritative host only; ExtraEnemy is the big RED skull.
+-- GrainRotSkulls v0.2.0-alpha: always force 3 ExtraEnemy (red skull) elevator modifiers.
+-- UE4SS Lua, authoritative host only. Never edits save files.
 local CFG = {
-  ROT_SCALE=100, -- CurrentGrainRot 50 means 50%; change to 1 if game reports 0..1
-  SKULL_NAME="ExtraEnemy", BLANK_NAME="Blank",
-  TICK_MS=250, MAX_TICKS=32, VERBOSE=false,
+    SKULL_ASSET = "ExtraEnemy",    -- confirmed in game ObjectDump (ExtraEnemy_DungeonMod)
+    SKULL_WEIGHT = 1000000,
+    FORCE_MODIFIER_COUNT = 3,
+    TICK_MS = 500,
+    RETUNE_EVERY_TICKS = 20,
+    MAX_SCAN_ROWS = 256,
+    DIAGNOSTICS = true,
 }
-local PREFIX="[GrainRotSkulls] "
-local function log(s) print(PREFIX..tostring(s).."\n") end
-local function get(o,k)
-  if o==nil then return nil end
-  local ok,v=pcall(function() return o[k] end)
-  if ok then return v end
+local TAG="[GrainRotSkulls] "
+local function log(message) print(TAG..tostring(message).."\n") end
+local function get(o,key)
+    if o==nil then return nil end
+    local ok,r=pcall(function() return o[key] end)
+    if ok then return r end
 end
 local function valid(o)
-  if o==nil then return false end
-  local ok,v=pcall(function() return o:IsValid() end)
-  return ok and v==true
+    if o==nil then return false end
+    local ok,r=pcall(function() return o:IsValid() end)
+    return ok and r==true
 end
-local function fullName(o)
-  if o==nil then return "nil" end
-  local ok,s=pcall(function() return o:GetFullName() end)
-  return ok and tostring(s) or tostring(o)
+local function fullname(o)
+    if o==nil then return "nil" end
+    local ok,r=pcall(function() return o:GetFullName() end)
+    return ok and tostring(r) or tostring(o)
 end
-local function live(o)
-  return valid(o) and not fullName(o):find("Default__",1,true)
+local function isCDO(o)
+    return fullname(o):find("Default__",1,true)~=nil
 end
-local function all(class)
-  local ok,objs=pcall(FindAllOf,class)
-  if not ok or objs==nil then return {} end
-  local okN,n=pcall(function() return #objs end)
-  if not okN or type(n)~="number" then return {} end
-  local out={}
-  for i=1,math.min(n,128) do
-    local okV,v=pcall(function() return objs[i] end)
-    if okV and live(v) then out[#out+1]=v end
-  end
-  return out
+local function unwrap(x)
+    if x==nil then return nil end
+    local ok,r=pcall(function() return x:get() end)
+    if ok and r~=nil then return r end
+    return x
 end
-local function first(class)
-  local a=all(class)
-  if a[1] then return a[1] end
-  local ok,v=pcall(FindFirstOf,class)
-  if ok and live(v) then return v end
+local function ueName(x)
+    x=unwrap(x)
+    if x==nil then return "" end
+    local ok,r=pcall(function() return x:ToString() end)
+    if ok and r then return tostring(r) end
+    return tostring(x)
 end
-local function uint16(v)
-  local n=tonumber(v)
-  if n and n==n and n>=0 and n<=65535 and math.floor(n)==n then return n end
+local function number(x)
+    local v=tonumber(unwrap(x))
+    if v and v==v and v~=math.huge and v~=-math.huge then return v end
+end
+local function uint16(x)
+    local n=number(x)
+    if n and n>=0 and n<=65535 and n==math.floor(n) then return n end
+end
+local function all(class,includeCDO)
+    local ok,list=pcall(FindAllOf,class)
+    if not ok or not list then return {} end
+    local okN,n=pcall(function() return #list end)
+    if not okN or type(n)~="number" then return {} end
+    local out={}
+    for i=1,math.min(n,256) do
+        local okItem,item=pcall(function() return list[i] end)
+        if okItem and valid(item) and (includeCDO or not isCDO(item)) then
+            out[#out+1]=item
+        end
+    end
+    return out
+end
+local function first(class,includeCDO)
+    local values=all(class,includeCDO)
+    if values[1] then return values[1] end
+    local ok,v=pcall(FindFirstOf,class)
+    if ok and valid(v) and (includeCDO or not isCDO(v)) then return v end
 end
 
--- Probability rules are pure Lua, shared with executable CI tests.
+-- Pure, testable policy. The ExtraEnemy implementation enum (2) is NOT its row ID.
 local Core={}
-function Core.percent(value,scale)
-  local n=tonumber(value)
-  if not n or n~=n or n==math.huge or n==-math.huge or not scale or scale<=0 then return nil end
-  return math.max(0,math.min(100,100*n/scale))
+function Core.matchSkull(rowName,assetName,dataName)
+    local text=(ueName(rowName).."|"..ueName(assetName).."|"..ueName(dataName)):lower()
+    return text:find("extraenemy",1,true)~=nil
 end
-function Core.plan(percentages,rng)
-  local p={}
-  for _,v in ipairs(percentages) do
-    if type(v)=="number" then p[#p+1]=math.max(0,math.min(100,v)) end
-  end
-  table.sort(p,function(a,b) return a>b end)
-  local slots={}
-  for i=1,math.min(3,#p) do
-    local roll=rng()
-    assert(type(roll)=="number" and roll>=0 and roll<=1,"invalid RNG")
-    slots[i]={chance=p[i],skull=roll<p[i]/100}
-  end
-  return slots
+function Core.values(isSkull)
+    if isSkull then
+        return {RandomWeight=CFG.SKULL_WEIGHT,MaxCount=3,RequiredLevel=0}
+    end
+    return {RandomWeight=0}
 end
-function Core.replace(original,slots,skullID,blankID)
-  assert(uint16(skullID) and uint16(blankID) and skullID~=blankID,"invalid modifier IDs")
-  local result={}
-  for i=1,#original do result[i]=original[i] end
-  for i=1,math.min(3,#slots) do
-    if slots[i].skull then result[i]=skullID
-    elseif result[i]==skullID then result[i]=blankID end
-  end
-  return result
+function Core.force(ids,skullId)
+    assert(uint16(skullId),"invalid skull modifier ID")
+    return {skullId,skullId,skullId}
 end
 _G.GrainRotSkullsCore=Core
 if rawget(_G,"GRAINROT_SKULLS_TEST") then return end
 
-local state={roll=0,pending=nil,ids=nil,warnings={}}
-local function warn(key,s)
-  if state.warnings[key] then return end
-  state.warnings[key]=true
-  log("WARNING "..s)
+local S={
+    ticks=0,rolls=0,skullId=nil,tableRef=nil,lastTableSignature=nil,
+    warnings={},seenSeeds={},loggedHooks={},liveChanges=0,
+}
+local function warnOnce(key,message)
+    if S.warnings[key] then return end
+    S.warnings[key]=true
+    log("WARNING: "..message)
 end
 local function host()
-  return first("HeldenGameMode")~=nil or first("GameModeBase")~=nil
+    return first("HeldenGameMode",false)~=nil or first("GameModeBase",false)~=nil
 end
-local function corruption(pc)
-  local ok,pawn=pcall(function() return pc:GetPawn() end)
-  if not ok or not live(pawn) or not live(get(pawn,"CharacterStats")) then
-    pawn=get(pc,"LastPlayerChar")
-  end
-  local stats=live(pawn) and get(pawn,"CharacterStats")
-  if not live(stats) then return nil end
-  return Core.percent(get(stats,"CurrentGrainRot"),CFG.ROT_SCALE)
-end
-local function squad()
-  local values,seen={},{}
-  for _,pc in ipairs(all("HeldenPlayerController")) do
-    local key=fullName(pc)
-    if not seen[key] then
-      seen[key]=true
-      local p=corruption(pc)
-      if p then
-        values[#values+1]=p
-        if CFG.VERBOSE then log(key.." corruption="..p.."%") end
-      else
-        warn("rot:"..key,"cannot read CurrentGrainRot for player "..key)
-      end
+local function selectedDataTable()
+    if valid(S.tableRef) then return S.tableRef end
+    local candidates=all("HeldenDataSingleton",true)
+    local f=first("HeldenDataSingleton",true)
+    if f then candidates[#candidates+1]=f end
+    for _,singleton in ipairs(candidates) do
+        local table=get(singleton,"DungeonModiferDataTable")
+        if valid(table) then
+            S.tableRef=table
+            log("DataTable found through HeldenDataSingleton: "..fullname(table))
+            return table
+        end
     end
-  end
-  return values
+    -- The actual asset is present in the verified ObjectDump, even if the
+    -- singleton is a CDO or not instantiated yet.
+    for _,table in ipairs(all("DataTable",true)) do
+        if fullname(table):find("DungeonModifers.DungeonModifers",1,true) then
+            S.tableRef=table
+            log("DataTable found via object registry: "..fullname(table))
+            return table
+        end
+    end
+end
+local function rowRecords(dt)
+    local found,seen={},{}
+    local function add(name,row)
+        if row==nil then return end
+        local v=unwrap(get(row,"Data") or row)
+        local id=uint16(get(v,"ModiferID"))
+        if not id then return end
+        local key=ueName(name)..":"..tostring(id)
+        if seen[key] then return end
+        seen[key]=true
+        if #found<CFG.MAX_SCAN_ROWS then
+            found[#found+1]={
+                name=ueName(name),id=id,row=v,
+                skull=Core.matchSkull(name,get(v,"DataAssetName"),get(v,"DataName")),
+            }
+        end
+    end
+    local ok,err=pcall(function()
+        dt:ForEachRow(function(name,row) add(name,row) end)
+    end)
+    if #found==0 then
+        local okMap,map=pcall(function() return dt:GetRowMap() end)
+        if okMap and type(map)=="table" then
+            for name,row in pairs(map) do add(name,row) end
+        end
+    end
+    if #found==0 then
+        local okRows,rows=pcall(function() return dt:GetAllRows() end)
+        if okRows and type(rows)=="table" then
+            for _,entry in ipairs(rows) do
+                local name=get(entry,"Name")
+                local okRef,ref=pcall(function() return dt:FindRow(ueName(name)) end)
+                add(name,(okRef and ref) or get(entry,"Data"))
+            end
+        end
+    end
+    if #found==0 then
+        warnOnce("rows","modifier DataTable rows inaccessible (ForEachRow: "..tostring(err)..")")
+    end
+    return found
+end
+local function writeProperty(obj,key,value)
+    local old=get(obj,key)
+    if old==value then return true,false end
+    local ok=pcall(function() obj[key]=value end)
+    if not ok then return false,false end
+    return get(obj,key)==value,true
+end
+local function tuneTable(origin)
+    if not host() then return nil end
+    local dt=selectedDataTable()
+    if not valid(dt) then
+        warnOnce("table","DungeonModiferDataTable not yet available on host")
+        return nil
+    end
+    local rows=rowRecords(dt)
+    local chosen=nil
+    for _,entry in ipairs(rows) do
+        if entry.skull then
+            if chosen and chosen.id~=entry.id then
+                warnOnce("ambiguous","multiple ExtraEnemy modifier IDs; refusing unsafe override")
+                return nil
+            end
+            chosen=entry
+        end
+    end
+    if not chosen then
+        local sample={}
+        for i=1,math.min(12,#rows) do sample[#sample+1]=rows[i].name.."="..rows[i].id end
+        warnOnce("skullMissing","ExtraEnemy not found in table; seen "..#rows.." rows: "..table.concat(sample,", "))
+        return nil
+    end
+    S.skullId=chosen.id
+    local correct,failed=0,0
+    local written=0
+    for _,entry in ipairs(rows) do
+        local desired=Core.values(entry.skull)
+        for field,value in pairs(desired) do
+            local ok,changed=writeProperty(entry.row,field,value)
+            if ok then
+                correct=correct+1
+                if changed then written=written+1 end
+            else
+                failed=failed+1
+            end
+        end
+    end
+    if failed>0 then
+        warnOnce("weights","DataTable changes did not persist for "..failed.." row fields")
+    end
+    if written>0 or S.lastTableSignature~=fullname(dt)..":"..chosen.id then
+        log(string.format("TABLE %s origin=%s; rows=%d, fields OK=%d, failed=%d, changed=%d, ExtraEnemy ID=%d; target MaxCount=3, Weight=%d",
+            (failed==0 and "TUNED" or "PARTIAL"),origin,#rows,correct,failed,written,
+            chosen.id,CFG.SKULL_WEIGHT))
+    end
+    S.lastTableSignature=fullname(dt)..":"..chosen.id
+    return S.skullId
 end
 
--- DataTable row IDs are different from EHeldenDungeonModiferImplementation.
--- Resolve both IDs by the game's real asset names; never guess constants.
-local function textValue(value)
-  if value==nil then return "" end
-  local ok,s=pcall(function() return value:ToString() end)
-  if ok and s then return tostring(s) end
-  return tostring(value)
+local function activeDungeon()
+    local gs=first("HeldenGameState",false)
+    local run=gs and get(gs,"CurrentDungeonRun")
+    local actor=run and get(run,"DungeonActor")
+    if valid(actor) and not isCDO(actor) then return actor end
+    return first("HeldenDungeonActor",false)
 end
-local function analyzeRow(found,row)
-  local v=get(row,"Data") or row
-  local id=uint16(get(v,"ModiferID"))
-  if not id then return end
-  local name=(textValue(get(v,"DataName")).." "..textValue(get(v,"DataAssetName"))):lower()
-  local function add(key,needle)
-    if not name:find(needle:lower(),1,true) then return end
-    if found[key]~=nil and found[key]~=id then found[key]=false
-    elseif found[key]==nil then
-      found[key]=id
-      found[key.."MaxCount"]=tonumber(get(v,"MaxCount"))
+local function seedInfo(actor)
+    if not valid(actor) or isCDO(actor) then return nil end
+    local seed=get(actor,"CurrentSeed")
+    local ids=seed and get(seed,"ModiferIDs")
+    if ids==nil then return nil end
+    local okN,n=pcall(function() return #ids end)
+    if not okN or type(n)~="number" then return nil end
+    local values={}
+    for i=1,math.min(n,12) do
+        local ok,v=pcall(function() return ids[i] end)
+        values[i]=ok and uint16(v) or nil
     end
-  end
-  add("skull",CFG.SKULL_NAME)
-  add("blank",CFG.BLANK_NAME)
-  -- Native selection may limit repeated skulls: increase only the identified
-  -- ExtraEnemy row to three, and verify a real reflected row write.
-  if name:find(CFG.SKULL_NAME:lower(),1,true) then
-    local old=tonumber(get(v,"MaxCount"))
-    if old and old>0 and old<3 then
-      local success=pcall(function() v.MaxCount=3 end)
-      local actual=tonumber(get(v,"MaxCount"))
-      if success and actual==3 then
-        found.skullMaxCount=3
-        found.capRaised=true
-      else
-        found.capRaiseFailed=true
-      end
+    return seed,ids,n,values
+end
+local function forceSeed(origin,actor)
+    if not host() then return false end
+    local id=S.skullId or tuneTable(origin)
+    if not id then return false end
+    actor=actor and unwrap(actor) or activeDungeon()
+    if not valid(actor) or isCDO(actor) then return false end
+    local seed,arr,count,old=seedInfo(actor)
+    if not seed then return false end
+    local key=fullname(actor)..":"..tostring(get(seed,"Seed"))..":"..tostring(get(seed,"Level"))
+    if count<CFG.FORCE_MODIFIER_COUNT then
+        -- UE4SS 3.0.x has documented unsafe TArray growth paths.
+        -- Never resize the game's native TArray in place while the world is live.
+        warnOnce("short:"..key,
+            string.format("ModiferIDs has %d entries; cannot safely resize to 3 on UE4SS 3.x. Table weights remain active",count))
+        return false
     end
-  end
-end
-local function examine(found,collection)
-  if not collection then return end
-  if type(collection)=="table" then
-    for _,v in pairs(collection) do analyzeRow(found,v) end
-    return
-  end
-  local ok,n=pcall(function() return #collection end)
-  if not ok or type(n)~="number" then return end
-  for i=1,math.min(n,1024) do
-    local okItem,v=pcall(function() return collection[i] end)
-    if okItem then analyzeRow(found,v) end
-  end
-end
-local function resolve()
-  if state.ids then return state.ids end
-  local singleton=first("HeldenDataSingleton")
-  local dt=singleton and get(singleton,"DungeonModiferDataTable")
-  if not valid(dt) then
-    warn("table","DungeonModiferDataTable unavailable; no modifier changes")
-    return nil
-  end
-  local found={}
-  -- ForEachRow is the documented working route in our GrainRotQOL mod;
-  -- other UE4SS builds use the row map / GetAllRows alternatives.
-  local okEach,errEach=pcall(function()
-    dt:ForEachRow(function(_,row) analyzeRow(found,row) end)
-  end)
-  if not okEach and CFG.VERBOSE then log("ForEachRow unavailable: "..tostring(errEach)) end
-  local ok,rows=pcall(function() return dt:GetAllRows() end)
-  if ok then examine(found,rows) end
-  if type(found.skull)~="number" or type(found.blank)~="number" then
-    local okMap,m=pcall(function() return dt:GetRowMap() end)
-    if okMap then examine(found,m) end
-  end
-  if type(found.skull)~="number" or type(found.blank)~="number" then
-    local okNames,names=pcall(function() return dt:GetRowNames() end)
-    if okNames and names then
-      local okLen,n=pcall(function() return #names end)
-      if okLen and type(n)=="number" then
-        for i=1,math.min(n,1024) do
-          local okName,name=pcall(function() return names[i] end)
-          if okName then
-            local okRow,row=pcall(function() return dt:FindRow(name) end)
-            if okRow then analyzeRow(found,row) end
-          end
+    local forced=Core.force(old,id)
+    if old[1]==id and old[2]==id and old[3]==id then
+        if not S.seenSeeds[key] then
+            S.seenSeeds[key]=true
+            log("SEED ALREADY TRIPLE-SKULL via "..origin.." id="..id.." seed="..key)
         end
-      end
+        return true
     end
-  end
-  if type(found.skull)~="number" or type(found.blank)~="number" or found.skull==found.blank then
-    warn("ids","ExtraEnemy/Blank ModiferIDs unresolved or ambiguous. No guess, no patch")
-    return nil
-  end
-  state.ids=found
-  log(string.format("DataTable IDs: ExtraEnemy=%d Blank=%d ExtraEnemy.MaxCount=%s",
-    found.skull,found.blank,tostring(found.skullMaxCount)))
-  if found.capRaised then log("raised live ExtraEnemy MaxCount to 3 (verified readback)") end
-  if found.capRaiseFailed or (found.skullMaxCount and found.skullMaxCount<3) then
-    warn("maxcount","could not raise native ExtraEnemy MaxCount to 3; repeated skull effects unverified")
-  end
-  return found
-end
-local function dungeon()
-  local gs=first("HeldenGameState")
-  local run=gs and get(gs,"CurrentDungeonRun")
-  local d=run and get(run,"DungeonActor")
-  if live(d) then return d end
-  return first("HeldenDungeonActor")
-end
-local function seedIDs(d)
-  if not live(d) then return nil end
-  local seed=get(d,"CurrentSeed")
-  local arr=get(seed,"ModiferIDs")
-  if not arr then return nil end
-  local ok,n=pcall(function() return #arr end)
-  if not ok or n~=3 then return nil end
-  local vals={}
-  for i=1,3 do
-    local success,v=pcall(function() return arr[i] end)
-    if not success then return nil end
-    vals[i]=uint16(v)
-    if not vals[i] then return nil end
-  end
-  return vals,seed,arr
-end
-local function identity(d)
-  if not live(d) then return "no-dungeon" end
-  local vals=seedIDs(d)
-  local seed=get(d,"CurrentSeed")
-  return fullName(d)..":"..tostring(get(seed,"Seed"))..":"..table.concat(vals or {},",")
-end
-local function apply(d,expected)
-  local _,seed,arr=seedIDs(d)
-  if not arr then return false,"missing modifier array" end
-  for i=1,3 do
-    local ok,err=pcall(function() arr[i]=expected[i] end)
-    if not ok then return false,"array write "..i..": "..tostring(err) end
-  end
-  -- Best-effort outer struct propagation; direct array assignments come first.
-  pcall(function() seed.ModiferIDs=arr end)
-  pcall(function() d.CurrentSeed=seed end)
-  local readback=seedIDs(d)
-  if not readback then return false,"readback missing" end
-  for i=1,3 do
-    if readback[i]~=expected[i] then return false,"readback mismatch at "..i end
-  end
-  return true
-end
-local function tryApply(when,d,force)
-  local p=state.pending
-  if not p or not host() then return end
-  if not live(d) then d=dungeon() end
-  if not live(d) then return end
-  if not force and identity(d)==p.before then return end
-  local before=seedIDs(d)
-  if not before then return end
-  local ids=resolve()
-  if not ids then return end
-  local after=Core.replace(before,p.slots,ids.skull,ids.blank)
-  local different=false
-  for i=1,3 do if before[i]~=after[i] then different=true end end
-  if different then
-    local ok,err=apply(d,after)
-    if not ok then
-      warn("write:"..p.number,"roll "..p.number.." could not apply native seed: "..tostring(err))
-      return
+    for i=1,3 do
+        local ok,err=pcall(function() arr[i]=forced[i] end)
+        if not ok then
+            warnOnce("seedwrite:"..key,"native modifier array write failed: "..tostring(err))
+            return false
+        end
     end
-  end
-  local labels={}
-  for i=1,3 do
-    local s=p.slots[i]
-    labels[i]=s and string.format("%.1f%%=%s",s.chance,s.skull and "SKULL" or "native")
-       or "unassigned"
-  end
-  log(string.format("roll %d APPLIED via %s: [%s] => [%s]; [%s]",
-    p.number,when,table.concat(before,","),table.concat(after,","),table.concat(labels,"; ")))
-  state.pending=nil
+    -- Nested reflected properties may require a write-through to UPROPERTY.
+    pcall(function() seed.ModiferIDs=arr end)
+    pcall(function() actor.CurrentSeed=seed end)
+    local _,_,n,actual=seedInfo(actor)
+    if n and n>=3 and actual[1]==id and actual[2]==id and actual[3]==id then
+        S.liveChanges=S.liveChanges+1
+        log(string.format("SEED FORCED via %s: [%s,%s,%s] -> [%d,%d,%d], readback OK, seed=%s",
+            origin,tostring(old[1]),tostring(old[2]),tostring(old[3]),id,id,id,key))
+        S.seenSeeds[key]=true
+        return true
+    end
+    warnOnce("readback:"..key,"seed write not reflected in readback; no proof of change")
+    return false
 end
-local function unwrap(v)
-  local ok,result=pcall(function() return v:get() end)
-  if ok and result then return result end
-  return v
+local function guard(label,fn)
+    return function(...)
+        local ok,err=pcall(fn,...)
+        if not ok then warnOnce("error:"..label,"callback "..label.." failed: "..tostring(err)) end
+    end
 end
-local function rollPre(machine)
-  if not host() or not live(unwrap(machine)) then return end
-  local values=squad()
-  if not resolve() then return end
-  if #values==0 then
-    warn("empty","no valid player corruption readings; leaving vanilla roll intact")
-    return
-  end
-  state.roll=state.roll+1
-  state.pending={number=state.roll,ticks=0,before=identity(dungeon()),
-    slots=Core.plan(values,math.random)}
-  local labels={}
-  for i=1,3 do
-    local s=state.pending.slots[i]
-    labels[i]=s and string.format("%.1f%%",s.chance) or "vanilla"
-  end
-  log("roll "..state.roll.." captured; chances: "..table.concat(labels,", "))
+local function register(path,pre,post)
+    local ok,err=pcall(RegisterHook,path,pre and guard(path.." PRE",pre) or nil,
+        post and guard(path.." POST",post) or nil)
+    if ok then
+        log("registered native hook (execution not yet confirmed) "..path)
+    else
+        warnOnce("hook:"..path,"hook registration failed: "..tostring(err))
+    end
 end
-local function guarded(name,fn)
-  return function(...)
-    local ok,err=pcall(fn,...)
-    if not ok then warn("callback:"..name,name.." callback failed: "..tostring(err)) end
-  end
+local function beforeRoll(self)
+    if not host() then return end
+    S.rolls=S.rolls+1
+    log("ROLL EVENT #"..S.rolls.." - forcing ExtraEnemy on host")
+    tuneTable("roll-pre")
+    forceSeed("roll-pre")
 end
-local function hook(path,pre,post)
-  local ok,err=pcall(RegisterHook,path,
-    pre and guarded(path..":pre",pre) or nil,
-    post and guarded(path..":post",post) or nil)
-  if ok then log("hook registered (callback not proven): "..path)
-  else warn("hook:"..path,"register hook failed: "..tostring(err)) end
-end
-hook("/Script/Helden.HeldenElevatorMachine:StartDungeonRoll_Auth",
-    rollPre,function() tryApply("roll-post",dungeon(),false) end)
-hook("/Script/Helden.HeldenDungeonActor:RegenerateDungeon",
-    function(d) tryApply("regenerate-pre",unwrap(d),true) end)
-hook("/Script/Helden.HeldenElevatorMachine:StartSymbolAnimation_Multicast",
-    function() tryApply("animation-pre",dungeon(),false) end)
+register("/Script/Helden.HeldenElevatorMachine:StartDungeonRoll_Auth",
+    beforeRoll,function() forceSeed("roll-post") end)
+register("/Script/Helden.HeldenElevatorMachine:OnStartPreSequence_Auth",
+    function() tuneTable("presequence") end)
+register("/Script/Helden.HeldenElevatorMachine:StartSymbolAnimation_Multicast",
+    function() forceSeed("symbol-pre") end)
+register("/Script/Helden.HeldenDungeonActor:RegenerateDungeon",
+    function(actor) forceSeed("generate-pre",actor) end,
+    function(actor) forceSeed("generate-post",actor) end)
+register("/Script/Helden.HeldenElevatorMachine:OnFinishedSymbolAnimation",
+    function() forceSeed("symbol-end") end)
 local function tick()
-  local p=state.pending
-  if not p or not host() then return end
-  p.ticks=p.ticks+1
-  if p.ticks>CFG.MAX_TICKS then
-    warn("timeout:"..p.number,"roll "..p.number.." expired without native seed patch; NOT verified")
-    state.pending=nil
-    return
-  end
-  tryApply("seed-poll",dungeon(),false)
+    if not host() then return end
+    S.ticks=S.ticks+1
+    if S.skullId==nil or S.ticks==1 or S.ticks%CFG.RETUNE_EVERY_TICKS==0 then
+        tuneTable("timer")
+    end
+    if S.skullId~=nil then forceSeed("timer") end
 end
-local ok,err=pcall(LoopInGameThreadWithDelay,CFG.TICK_MS,guarded("tick",tick))
-if not ok then warn("timer","game-thread loop unavailable: "..tostring(err)) end
-pcall(function() math.randomseed(os.time()) end)
-log("v0.1.0-alpha loaded; authority host only; skull=ExtraEnemy; scale="..CFG.ROT_SCALE)
+local ok,handle=pcall(LoopInGameThreadWithDelay,CFG.TICK_MS,guard("timer",tick))
+if ok and handle~=nil then
+    log("game-thread loop started: "..CFG.TICK_MS.." ms (no per-frame hook)")
+else
+    warnOnce("noLoop","LoopInGameThreadWithDelay unavailable: "..tostring(handle).."; native hooks only")
+end
+log("v0.2.0-alpha LOADED; always force 3 ExtraEnemy skulls; corruption and player count IGNORED")
