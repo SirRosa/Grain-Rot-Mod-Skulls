@@ -312,8 +312,16 @@ local function guard(label,fn)
     end
 end
 local function register(path,pre,post)
-    local ok,err=pcall(RegisterHook,path,pre and guard(path.." PRE",pre) or nil,
-        post and guard(path.." POST",post) or nil)
+    -- UE4SS v3 expects a function in optional parameter #3 if supplied.
+    -- For pre-only hooks pass exactly two arguments, not a nil third argument.
+    local ok,err
+    if pre and post then
+        ok,err=pcall(RegisterHook,path,guard(path.." PRE",pre),guard(path.." POST",post))
+    elseif pre then
+        ok,err=pcall(RegisterHook,path,guard(path.." PRE",pre))
+    else
+        return
+    end
     if ok then
         log("registered native hook (execution not yet confirmed) "..path)
     else
