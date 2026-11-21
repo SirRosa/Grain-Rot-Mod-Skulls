@@ -135,6 +135,21 @@ local function analyzeRow(found,row)
   end
   add("skull",CFG.SKULL_NAME)
   add("blank",CFG.BLANK_NAME)
+  -- Native selection may limit repeated skulls: increase only the identified
+  -- ExtraEnemy row to three, and verify a real reflected row write.
+  if name:find(CFG.SKULL_NAME:lower(),1,true) then
+    local old=tonumber(get(v,"MaxCount"))
+    if old and old>0 and old<3 then
+      local success=pcall(function() v.MaxCount=3 end)
+      local actual=tonumber(get(v,"MaxCount"))
+      if success and actual==3 then
+        found.skullMaxCount=3
+        found.capRaised=true
+      else
+        found.capRaiseFailed=true
+      end
+    end
+  end
 end
 local function examine(found,collection)
   if not collection then return end
@@ -158,6 +173,12 @@ local function resolve()
     return nil
   end
   local found={}
+  -- ForEachRow is the documented working route in our GrainRotQOL mod;
+  -- other UE4SS builds use the row map / GetAllRows alternatives.
+  local okEach,errEach=pcall(function()
+    dt:ForEachRow(function(_,row) analyzeRow(found,row) end)
+  end)
+  if not okEach and CFG.VERBOSE then log("ForEachRow unavailable: "..tostring(errEach)) end
   local ok,rows=pcall(function() return dt:GetAllRows() end)
   if ok then examine(found,rows) end
   if type(found.skull)~="number" or type(found.blank)~="number" then
@@ -186,8 +207,9 @@ local function resolve()
   state.ids=found
   log(string.format("DataTable IDs: ExtraEnemy=%d Blank=%d ExtraEnemy.MaxCount=%s",
     found.skull,found.blank,tostring(found.skullMaxCount)))
-  if found.skullMaxCount and found.skullMaxCount<3 then
-    warn("maxcount","native ExtraEnemy MaxCount < 3; repeated skull effects need live verification")
+  if found.capRaised then log("raised live ExtraEnemy MaxCount to 3 (verified readback)") end
+  if found.capRaiseFailed or (found.skullMaxCount and found.skullMaxCount<3) then
+    warn("maxcount","could not raise native ExtraEnemy MaxCount to 3; repeated skull effects unverified")
   end
   return found
 end
@@ -275,6 +297,7 @@ end
 local function rollPre(machine)
   if not host() or not live(unwrap(machine)) then return end
   local values=squad()
+  if not resolve() then return end
   if #values==0 then
     warn("empty","no valid player corruption readings; leaving vanilla roll intact")
     return
