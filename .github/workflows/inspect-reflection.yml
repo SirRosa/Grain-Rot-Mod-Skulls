@@ -18,39 +18,37 @@ jobs:
           repository: SirRosa/Grain-Rot-Mod-Data-Base
           ref: main
           persist-credentials: false
-      - name: Scan authoritative reflection dump
+      - name: Inspect elevator roll, modifiers and player grain rot
         shell: bash
         run: |
           python - <<'PY'
           import gzip, json, re
           from pathlib import Path
           db=json.loads(gzip.decompress(Path('data/current-schema.json.gz').read_bytes()))
-          match=re.compile(r'skull|grain.?rot|corrupt|modifier|elevator|slot|chance|random|roulette|curse|dungeon.?affix',re.I)
-          print('SCHEMA CATEGORIES:',list(db.keys()))
-          for category in ['structs','enums']:
-            entries=db[category]
-            hits=[(k,v) for k,v in entries.items() if match.search(k) and (k.startswith('Helden') or k.startswith('EHelden') or k.startswith('BP_'))]
-            print('===',category,'MATCHING TYPES',len(hits),'===')
-            for k,v in hits[:125]:
-              s=json.dumps(v,ensure_ascii=False)
-              print(k,':',s[:1300])
-          print('=== DIRECT ELEVATOR/ROT FIELDS IN HELDEN TYPES ===')
-          matches=[]
-          for k,v in db.get('structs',{}).items():
-            if not (k.startswith('Helden') or k.startswith('BP_')): continue
-            vs=json.dumps(v,ensure_ascii=False)
-            if match.search(vs):
-              matches.append((k,vs))
-          print('type count',len(matches))
-          for k,vs in matches[:180]:
-            keys=re.findall(r'"[^"]*(?:skull|rot|modifier|chance|random|elevator|slot|affix)[^"]*"',vs,re.I)
-            print(k, ':', ' '.join(dict.fromkeys(keys))[:900])
+          structs=db['structs']
+          print('=== NAME INDEX ===')
+          for name in sorted(structs):
+            if name.startswith('Helden') and re.search('Dungeon|Modifer|Modifier|GrainRot|StatsComponent|PlayerState|PlayerController|Elevator|CharcterData|CharacterData',name,re.I):
+              print(name)
+          print('=== TARGET CLASS DEFINITIONS ===')
+          for name in ['HeldenElevatorMachine','HeldenDungeonActor','HeldenDungeonPresetSettings','HeldenDungeonModiferDataTable','HeldenDungeonRunStats','HeldenStatsComponent','HeldenCharacter','HeldenCharacterStats','HeldenCharacterSaveData','HeldenPlayerState','HeldenGameState','HeldenGameMode','HeldenPlayerController','HeldenDungeonLevelSettings']:
+            if name in structs:
+              print(name, json.dumps(structs[name],ensure_ascii=False))
+          print('=== ALL MODIFIER ENUMS ===')
+          for name, val in db['enums'].items():
+            if re.search('Dungeon|Modifer|Modifier|Rot',name,re.I) and name.startswith('EHelden'):
+              print(name, json.dumps(val,ensure_ascii=False))
           raw=b''.join(p.read_bytes() for p in sorted(Path('data').glob('UE4SS-ObjectDump.txt.gz.part*')))
-          dump=gzip.decompress(raw).decode('utf-8','replace')
-          lines=dump.splitlines()
-          interesting=re.compile(r'(Skull|GrainRot|Grain_Rot|Elevator.*(Event|Modifier|Roll|Slot)|Dungeon.*Modifier|Modifier.*Dungeon|Chance.*Skull)',re.I)
-          found=[(i,line) for i,line in enumerate(lines) if interesting.search(line) and ('Helden' in line or 'BP_' in line)]
-          print('=== OBJECTDUMP MATCHES:',len(found),'===')
-          for i,line in found[:400]:
-            print(i+1,line[:300])
+          lines=gzip.decompress(raw).decode('utf-8','replace').splitlines()
+          print('=== FUNCTION METHOD SIGNATURES ===')
+          filt=re.compile(r'Function /Script/Helden\.(HeldenElevatorMachine|HeldenDungeonActor|HeldenDungeonModifer|HeldenDungeonPreset|HeldenStatsComponent|HeldenGameState|HeldenGameMode|HeldenPlayerController|HeldenCharacterStats|HeldenCharacter):',re.I)
+          inds=[i for i,line in enumerate(lines) if filt.search(line)]
+          print('function count',len(inds))
+          for i in inds:
+            print(i+1,lines[i][:240])
+            # Following parameter property entries are the authoritative UFunction signature.
+            j=i+1
+            while j < len(lines) and j-i <= 9 and re.search(r'(Property|Delegate) ',lines[j]) and ':ReturnValue' not in lines[j]:
+              print('  '+lines[j][:230])
+              j+=1
           PY
