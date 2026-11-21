@@ -28,7 +28,7 @@ Warnings are deliberately explicit. A readback is **not** equivalent to confirme
 ## Known limitations — do not confuse with working in-game behavior
 
 - Tests check Lua logic and a **mock engine** (table and seed writes, no player), plus syntax. Real UE4SS/game multiplayer is **not yet verified**.
-- Some game builds may roll fewer than three \`ModiferIDs\` and keep blank slots implicit. Since native TArray resizing in UE4SS 3.0.x can be unsafe, v0.2 only overwrites three already existing entries; if fewer, it emits \`ModiferIDs has N entries\` instead of potentially crashing the game. Table weights are still tuned.
+- Some builds may produce a `ModiferIDs` array containing 0–2 items. v0.2 tries sequential UE4SS TArray indexed appends (with size readback at every step); on failure it logs a warning and keeps the table-weight override rather than destroying the array. This is still subject to runtime verification on the installed UE4SS build.
 - \`ExtraEnemy.MaxCount\` may not be the only native uniqueness restriction, and changing \`CurrentSeed\` after dungeon creation might not cause game effects to reapply. **Three skulls visible and active in the actual game remain unconfirmed until a real host run.**
 - Table changes can affect all modifier rolls during this game process and reset after restart or unloading the mod. No intentional save modifications.
 

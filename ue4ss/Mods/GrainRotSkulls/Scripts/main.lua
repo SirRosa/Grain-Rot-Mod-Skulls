@@ -255,11 +255,26 @@ local function forceSeed(origin,actor)
     if not seed then return false end
     local key=fullname(actor)..":"..tostring(get(seed,"Seed"))..":"..tostring(get(seed,"Level"))
     if count<CFG.FORCE_MODIFIER_COUNT then
-        -- UE4SS 3.0.x has documented unsafe TArray growth paths.
-        -- Never resize the game's native TArray in place while the world is live.
-        warnOnce("short:"..key,
-            string.format("ModiferIDs has %d entries; cannot safely resize to 3 on UE4SS 3.x. Table weights remain active",count))
-        return false
+        -- UE4SS TArray is 1-indexed and supports indexed writes. The old v3.0.0
+        -- append bug was patched upstream; verify each append and fail closed
+        -- rather than calling Empty() or rebuilding a live native array.
+        for index=count+1,CFG.FORCE_MODIFIER_COUNT do
+            local success,err=pcall(function() arr[index]=id end)
+            if not success then
+                warnOnce("grow:"..key,
+                    "native TArray append failed at slot "..index..": "..tostring(err))
+                return false
+            end
+            local _,_,now=seedInfo(actor)
+            if not now or now<index then
+                warnOnce("grow:"..key,
+                    "native TArray did not grow to slot "..index.."; table weights remain active")
+                return false
+            end
+        end
+        -- Reacquire the native array after potential buffer reallocation.
+        seed,arr,count,old=seedInfo(actor)
+        if not seed or count<3 then return false end
     end
     local forced=Core.force(old,id)
     if old[1]==id and old[2]==id and old[3]==id then

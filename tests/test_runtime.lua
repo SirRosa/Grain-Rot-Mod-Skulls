@@ -16,7 +16,7 @@ function datatable:ForEachRow(fn)
 end
 local data=obj("HeldenDataSingleton /Script/Helden.GameData",{DungeonModiferDataTable=datatable})
 local gm=obj("HeldenGameMode /Game/Test.GameMode",{})
-local seed={Seed=300,Level=12,ModiferIDs={15,9,15}}
+local seed={Seed=300,Level=12,ModiferIDs={}}
 local dungeon=obj("HeldenDungeonActor /Game/Test.Dungeon",{CurrentSeed=seed})
 local gs=obj("HeldenGameState /Game/Test.GameState",{CurrentDungeonRun={DungeonActor=dungeon}})
 local db={
@@ -48,4 +48,9 @@ seed.ModiferIDs={9,15,9}
 roll.pre(gm)
 roll.post(gm)
 for i=1,3 do assert(seed.ModiferIDs[i]==31,"new roll slot "..i.." not forced") end
-print("PASS mocked engine interaction: DataTable weight patch, 3 native seed slots, second roll, zero players")
+seed.Seed=302
+seed.ModiferIDs={15}
+loop()
+assert(#seed.ModiferIDs==3 and seed.ModiferIDs[1]==31 and seed.ModiferIDs[2]==31 and seed.ModiferIDs[3]==31,
+  "single-entry seed must be safely expanded to three skulls")
+print("PASS mocked engine interaction: DataTable weights, zero/one/three-element native seeds, zero players")
