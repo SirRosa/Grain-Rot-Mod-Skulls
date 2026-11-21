@@ -35,7 +35,7 @@ IDs are looked up from rows by `DataName/DataAssetName`. **Never substitute the 
 ## IMPORTANT: alpha / not game-tested
 
 - GitHub Actions checks syntax and **simulated** probability rules. Native hook activation, timing, seed replication and correct symbol display at clients are not yet demonstrated in a real session.
-- The native game can restrict repeated `ExtraEnemy` IDs with `MaxCount`. The mod logs the observed limit; three 100% players are guaranteed by Lua logic but may not produce three applied modifiers if the game rejects duplicates.
+- The native game can restrict repeated `ExtraEnemy` IDs with `MaxCount`. The mod attempts to raise the actual table row to `MaxCount=3`, verifies the write and logs the result. Three 100% players are guaranteed by Lua probability rules, but the game may still deduplicate or ignore repeated effects; this needs live verification.
 - `CurrentGrainRot` defaults to a 0–100 scale. If a real log proves the game uses 0–1, change `ROT_SCALE` at the top of `main.lua` from 100 to 1.
 - Successful hook registration does not prove a callback was invoked. A log line `roll N APPLIED` confirms only a Lua-side modifier-array readback, not that the UI, level generation, Steam achievement or multiplayer client obeyed it.
 
