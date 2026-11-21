@@ -120,11 +120,17 @@ end
 
 -- DataTable row IDs are different from EHeldenDungeonModiferImplementation.
 -- Resolve both IDs by the game's real asset names; never guess constants.
+local function textValue(value)
+  if value==nil then return "" end
+  local ok,s=pcall(function() return value:ToString() end)
+  if ok and s then return tostring(s) end
+  return tostring(value)
+end
 local function analyzeRow(found,row)
   local v=get(row,"Data") or row
   local id=uint16(get(v,"ModiferID"))
   if not id then return end
-  local name=(tostring(get(v,"DataName") or "").." "..tostring(get(v,"DataAssetName") or "")):lower()
+  local name=(textValue(get(v,"DataName")).." "..textValue(get(v,"DataAssetName"))):lower()
   local function add(key,needle)
     if not name:find(needle:lower(),1,true) then return end
     if found[key]~=nil and found[key]~=id then found[key]=false
@@ -344,5 +350,5 @@ local function tick()
 end
 local ok,err=pcall(LoopInGameThreadWithDelay,CFG.TICK_MS,guarded("tick",tick))
 if not ok then warn("timer","game-thread loop unavailable: "..tostring(err)) end
-math.randomseed(os.time())
+pcall(function() math.randomseed(os.time()) end)
 log("v0.1.0-alpha loaded; authority host only; skull=ExtraEnemy; scale="..CFG.ROT_SCALE)
