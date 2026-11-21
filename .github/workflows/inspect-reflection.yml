@@ -4,51 +4,44 @@ on:
     paths:
       - '.github/workflows/inspect-reflection.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout game reflection database
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: SirRosa/Grain-Rot-Mod-Data-Base
           ref: main
           persist-credentials: false
-      - name: Inspect elevator roll, modifiers and player grain rot
+      - name: Inspect modifier data structures and functions
         shell: bash
         run: |
           python - <<'PY'
-          import gzip, json, re
+          import gzip,json,re
           from pathlib import Path
           db=json.loads(gzip.decompress(Path('data/current-schema.json.gz').read_bytes()))
-          structs=db['structs']
-          print('=== NAME INDEX ===')
-          for name in sorted(structs):
-            if name.startswith('Helden') and re.search('Dungeon|Modifer|Modifier|GrainRot|StatsComponent|PlayerState|PlayerController|Elevator|CharcterData|CharacterData',name,re.I):
-              print(name)
-          print('=== TARGET CLASS DEFINITIONS ===')
-          for name in ['HeldenElevatorMachine','HeldenDungeonActor','HeldenDungeonPresetSettings','HeldenDungeonModiferDataTable','HeldenDungeonRunStats','HeldenStatsComponent','HeldenCharacter','HeldenCharacterStats','HeldenCharacterSaveData','HeldenPlayerState','HeldenGameState','HeldenGameMode','HeldenPlayerController','HeldenDungeonLevelSettings']:
-            if name in structs:
-              print(name, json.dumps(structs[name],ensure_ascii=False))
-          print('=== ALL MODIFIER ENUMS ===')
-          for name, val in db['enums'].items():
-            if re.search('Dungeon|Modifer|Modifier|Rot',name,re.I) and name.startswith('EHelden'):
-              print(name, json.dumps(val,ensure_ascii=False))
+          types=['HeldenDungeonGenerationInfo','HeldenDungeonModiferContainer','HeldenDungeonModiferData','HeldenDungeonModiferDataTable','HeldenDungeonPresetData','HeldenDungeonPreset','HeldenDungeonLevelData','HeldenDungeonMetaData','HeldenDataSingleton','HeldenActiveDungeonRun','HeldenDungeonFunctions','HeldenDungeonAddon','HeldenDungeonRoomStyleSelection','HeldenCharacterData','HeldenStats','HeldenReplicatedStats']
+          for k in types:
+            val=db['structs'].get(k)
+            print('TYPE',k,json.dumps(val,ensure_ascii=False))
           raw=b''.join(p.read_bytes() for p in sorted(Path('data').glob('UE4SS-ObjectDump.txt.gz.part*')))
           lines=gzip.decompress(raw).decode('utf-8','replace').splitlines()
-          print('=== FUNCTION METHOD SIGNATURES ===')
-          filt=re.compile(r'Function /Script/Helden\.(HeldenElevatorMachine|HeldenDungeonActor|HeldenDungeonModifer|HeldenDungeonPreset|HeldenStatsComponent|HeldenGameState|HeldenGameMode|HeldenPlayerController|HeldenCharacterStats|HeldenCharacter):',re.I)
+          filt=re.compile(r'Function /Script/Helden\.(HeldenDungeonFunctions|HeldenDungeonModiferContainer|HeldenDungeonPreset|HeldenDungeonAddon|HeldenDataSingleton|HeldenDungeonLevelData):',re.I)
+          print('=== METHODS ===')
           inds=[i for i,line in enumerate(lines) if filt.search(line)]
-          print('function count',len(inds))
+          print('count',len(inds))
           for i in inds:
-            print(i+1,lines[i][:240])
-            # Following parameter property entries are the authoritative UFunction signature.
-            j=i+1
-            while j < len(lines) and j-i <= 9 and re.search(r'(Property|Delegate) ',lines[j]) and ':ReturnValue' not in lines[j]:
-              print('  '+lines[j][:230])
-              j+=1
+            print(lines[i][:250])
+            for j in range(i+1,min(i+8,len(lines))):
+              if 'Property ' not in lines[j]: break
+              print('  '+lines[j][:200])
+          print('=== BLUEPRINT MODIFIER ASSETS ===')
+          match=re.compile(r'/Game/.+(?:Skull|Modifer|Modifier)',re.I)
+          c=0
+          for line in lines:
+            if match.search(line) and ('BlueprintGeneratedClass' in line or 'DataTable ' in line or 'DataAsset ' in line or 'Package ' in line):
+              print(line[:400]);c+=1
+              if c>100:break
           PY
