@@ -6,7 +6,7 @@ on:
   pull_request:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   test-package:
     runs-on: ubuntu-latest
@@ -37,3 +37,16 @@ jobs:
           name: GrainRotSkulls-v0.2.0-alpha
           path: out/GrainRotSkulls-v0.2.0-alpha.zip
           if-no-files-found: error
+
+      - name: Publish single-install ZIP to GitHub Releases
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          file=out/GrainRotSkulls-v0.2.0-alpha.zip
+          tag=v0.2.0-alpha
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$file" --clobber
+          else
+            gh release create "$tag" "$file" --title 'GrainRotSkulls v0.2.0-alpha' --notes 'Experimental host-side forced three red skull elevator modifiers. Lua syntax and mocked engine tests pass; real multiplayer game behavior requires validation.'
+          fi

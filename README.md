@@ -14,7 +14,9 @@ v0.1 attempted to capture each player's Grain Rot only inside a native roll hook
 
 ## Install
 
-Download \`GrainRotSkulls-v0.2.0-alpha\` from a **successful v0.2 GitHub Actions run** in the [Actions tab](https://github.com/SirRosa/Grain-Rot-Mod-Skulls/actions). Unzip directly into the game's **UE4SS root**, yielding \`Mods/GrainRotSkulls/Scripts/main.lua\` and \`Mods/GrainRotSkulls/enabled.txt\`. **Remove the old GrainRotSkulls folder first**. Install on the **host**. No extra DLL needed.
+Download the **single installation ZIP** from [GitHub Releases](https://github.com/SirRosa/Grain-Rot-Mod-Skulls/releases/tag/v0.2.0-alpha) after the release workflow completes. **Remove the previous \`Mods/GrainRotSkulls\` directory** and extract the installation ZIP into the game's **UE4SS root**, yielding \`Mods/GrainRotSkulls/Scripts/main.lua\` and \`Mods/GrainRotSkulls/enabled.txt\`. Install on the **host**. No DLL needed.
+
+**Fallback:** GitHub Actions artifacts are wrapped ZIPs. If you download from [Actions](https://github.com/SirRosa/Grain-Rot-Mod-Skulls/actions) instead, first unpack the *artifact ZIP*, then unpack the contained \`GrainRotSkulls-v0.2.0-alpha.zip\` into UE4SS. Do not place the inner ZIP itself into \`Mods\`.
 
 ## What to look for in UE4SS.log
 
